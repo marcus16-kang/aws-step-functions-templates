@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: "Step Functions State Machine for Waiting Amazon Transcription Job"
+
+Resources:
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - states.amazonaws.com
+        Version: '2012-10-17'
+      Description: IAM Role for Amazon Transcripb Job Waiter Step Function State Machine.
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonTranscribeReadOnlyAccess
+      Path: /
+      RoleName: transcribe-waiter-state-machine-role
+  StateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      DefinitionString: |-
+        {
+          "Comment": "An Amazon Transcripter Job Waiter using a State Machine.",
+          "StartAt": "Wait",
+          "States": {
+            "Wait": {
+              "Type": "Wait",
+              "Seconds": 10,
+              "Next": "GetTranscriptionJob"
+            },
+            "GetTranscriptionJob": {
+              "Type": "Task",
+              "Parameters": {
+                "TranscriptionJobName.$": "$.jobName"
+              },
+              "Resource": "arn:aws:states:::aws-sdk:transcribe:getTranscriptionJob",
+              "Next": "Choice",
+              "ResultPath": "$.Transcription"
+            },
+            "Choice": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.Transcription.TranscriptionJob.TranscriptionJobStatus",
+                  "StringEquals": "COMPLETED",
+                  "Next": "Success"
+                }
+              ],
+              "Default": "Choice (1)"
+            },
+            "Success": {
+              "Type": "Succeed"
+            },
+            "Choice (1)": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.Transcription.TranscriptionJob.TranscriptionJobStatus",
+                  "StringEquals": "FAILED",
+                  "Next": "Fail"
+                }
+              ],
+              "Default": "Wait"
+            },
+            "Fail": {
+              "Type": "Fail"
+            }
+          }
+        }
+      RoleArn: !GetAtt Role.Arn
+      StateMachineName: transcribe-waiter-state-machine
+      StateMachineType: STANDARD
+      TracingConfiguration:
+        Enabled: true
